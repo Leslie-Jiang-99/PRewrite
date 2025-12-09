@@ -180,3 +180,4 @@ PRewrite/
 2. **生成模型服务**：需要单独启动生成模型服务（使用 vLLM 或 SGLang），用于评估重写后的指令
 3. **超参数调优**：根据具体任务调整 `num_generations`、`temperature`、`epsilon` 等参数
 4. **奖励权重**：可以通过 `reward_weights` 调整不同奖励函数的权重
+5. **多阶段训练**： 修改了`transformers/trainer.py`函数`_inner_training_loop`第2579行`epoch_dataloader = train_dataloader`为`epoch_dataloader = self.callback_handler.train_dataloader`，实现在训练过程中更新数据集。
