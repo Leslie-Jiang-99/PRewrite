@@ -25,6 +25,7 @@ if is_math_verify_available():
 
 import requests
 import json
+import re
 from transformers import AutoTokenizer
 from datasets import load_dataset
 import random
@@ -55,6 +56,8 @@ boolq_dataset_path = "/root/group-shared/jrc/data/super_glue"
 boolq_dataset_config = "boolq"
 cb_dataset_path = "/root/group-shared/jrc/data/super_glue"
 cb_dataset_config = "cb"
+aime_2024_dataset_path = "/root/group-shared/jrc/data/aime_2024"
+aime_2024_dataset_config = "default"
 
 task_classification_map = {
     "ag_news": {
@@ -177,6 +180,7 @@ train_dataset_dict = {
     "copa": load_dataset(copa_dataset_path, copa_dataset_config)["train"],
     "boolq": load_dataset(boolq_dataset_path, boolq_dataset_config)["train"],
     "cb": load_dataset(cb_dataset_path, cb_dataset_config)["train"],
+    "aime_2024": load_dataset(aime_2024_dataset_path, aime_2024_dataset_config)["train"],
 }
 
 test_dataset_dict = {
@@ -188,6 +192,7 @@ test_dataset_dict = {
     "copa": load_dataset(copa_dataset_path, copa_dataset_config)["validation"],
     "boolq": load_dataset(boolq_dataset_path, boolq_dataset_config)["validation"],
     "cb": load_dataset(cb_dataset_path, cb_dataset_config)["validation"],
+    "aime_2024": load_dataset(aime_2024_dataset_path, aime_2024_dataset_config)["train"],
 }
 
 def get_messages(instruction: str, example: dict, dataset_name: str, system_prompt: str="") -> list[dict[str, str]]:
@@ -207,6 +212,8 @@ def get_messages(instruction: str, example: dict, dataset_name: str, system_prom
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"{instruction}\nPremise: {example['premise']}\nHypothesis: {example['hypothesis']}"}]
     elif dataset_name == "nq_open":
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"{instruction}\nQuestion: {example['question']}"}]
+    elif dataset_name == "aime_2024":
+        return [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"{instruction}\nProblem: {example['problem']}"}]
     else:
         raise ValueError(f"Invalid dataset name: {dataset_name}")
 
@@ -299,7 +306,7 @@ def get_prewrite(generate_model_ip: str, generate_model_port: int, generate_mode
     
     return prewrite_accuracy_reward
 
-def get_accuracy_math(generate_model_ip: str, generate_model_port: int, tokenizer: AutoTokenizer, system_prompt: str="", test_size: int=10, is_test: bool=False) -> Callable:
+def get_accuracy_math(generate_model_ip: str, generate_model_port: int, tokenizer: AutoTokenizer, system_prompt: str="", test_size: int=10, is_test: bool=False, print_text: bool=False) -> Callable:
 
     def accuracy_math_reward(completions: list[list[dict[str, str]]], dataset_name: list[str], **kwargs) -> list[Optional[float]]:
         r"""
@@ -307,7 +314,7 @@ def get_accuracy_math(generate_model_ip: str, generate_model_port: int, tokenize
         """
         rewards = []
         for instruction, single_dataset_name in zip(completions, dataset_name):
-            if single_dataset_name in ["gsm8k", "MATH-500"]:
+            if single_dataset_name in ["gsm8k", "MATH-500", "aime_2024"]:
                 if is_test:
                     dataset = test_dataset_dict[single_dataset_name]
                     sample_size = len(dataset)
@@ -316,8 +323,11 @@ def get_accuracy_math(generate_model_ip: str, generate_model_port: int, tokenize
                     sample_size = min(test_size, len(dataset))
                 scores = []
                 generate_model_config = {
-                    "temperature": 0.0,
-                    "max_new_tokens": 2048,
+                    "temperature": 0.7,
+                    "top_p": 0.8,
+                    "top_k": 20,
+                    "presence_penalty": 1.5,
+                    "max_new_tokens": 4096,
                 }
                 random.seed(time.time())
                 indices = random.sample(range(len(dataset)), sample_size)
@@ -338,11 +348,28 @@ def get_accuracy_math(generate_model_ip: str, generate_model_port: int, tokenize
                     },
                 )
                 completions = [output["text"] for output in response.json()]
-                for example, completion in zip(dataset.select(indices), completions):
-                    gold_parsed = parse(
-                        example["answer"],
-                        extraction_mode="first_match",
-                    )
+                if print_text:
+                    print("=" * 100)
+                    print(f"text for dataset: {single_dataset_name}")
+                    print("=" * 100)
+                for prompt, example, completion in zip(prompts, dataset.select(indices), completions):
+                    if print_text:
+                        print(f"Prompt: {prompt}")
+                        print("-" * 100)
+                        print(f"Completion: {completion}")
+                        print("-" * 100)
+                        print(f"Answer: {example['answer']}")
+                        print("-" * 100)
+                    if single_dataset_name in ["MATH-500", "aime_2024"]:
+                        gold_parsed = parse(
+                            f"\\boxed{{{example['answer']}}}",
+                            extraction_mode="first_match",
+                        )
+                    else:
+                        gold_parsed = parse(
+                            example["answer"],
+                            extraction_mode="first_match",
+                        )
                     if len(gold_parsed) != 0:
                         # We require the answer to be provided in correct latex (no malformed operators)
                         answer_parsed = parse(
@@ -371,7 +398,12 @@ def get_accuracy_math(generate_model_ip: str, generate_model_port: int, tokenize
                     else:
                         # If the gold solution is not parseable, we assign `None` to skip this example
                         score = float(completion.strip().lower() == example["answer"].strip().lower())
+                    if print_text:
+                        print(f"Score: {score}")
+                        print("-" * 100)
                     scores.append(score)
+                if print_text:
+                    print("=" * 100)
                 rewards.append(np.mean(scores))
             else:
                 rewards.append(0)
@@ -605,3 +637,214 @@ def get_f1_classification(generate_model_ip: str, generate_model_port: int, toke
                 rewards.append(0.0)
         return rewards
     return f1_classification_reward
+
+def get_template_accuracy_math(generate_model_ip: str, generate_model_port: int, tokenizer: AutoTokenizer, system_prompt: str="", test_size: int=10, is_test: bool=False, print_text: bool=False) -> Callable:
+
+    def template_accuracy_math_reward(completions: list[list[dict[str, str]]], tags: list[list[str]], dataset_name: list[str], **kwargs) -> list[Optional[float]]:
+        r"""
+        Reward function that checks if the completion is the same as the ground truth.
+        """
+        rewards = []
+        for instruction, single_tags, single_dataset_name in zip(completions, tags, dataset_name):
+            if single_dataset_name in ["gsm8k", "MATH-500"]:
+                if is_test:
+                    dataset = test_dataset_dict[single_dataset_name]
+                    sample_size = len(dataset)
+                else:
+                    dataset = train_dataset_dict[single_dataset_name]
+                    sample_size = min(test_size, len(dataset))
+                scores = []
+                generate_model_config = {
+                    "temperature": 0.0,
+                    "max_new_tokens": 4096,
+                }
+                random.seed(time.time())
+                indices = random.sample(range(len(dataset)), sample_size)
+                prompts = []
+                # Check if instruction contains all tags and no other tags
+                if set(re.findall(r"{[^}]+}", instruction)) != set(single_tags): 
+                    rewards.append(-1)
+                    continue
+                for example in dataset.select(indices):
+                    prompt = tokenizer.apply_chat_template(
+                        [
+                            {"role": "system", "content": system_prompt}, 
+                            {"role": "user", "content": instruction.format(problem=example["problem"], subject=example["subject"], level=example["level"])}],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                        enable_thinking=False
+                    )
+                    prompts.append(prompt)
+                response = requests.post(
+                    f"http://{generate_model_ip}:{generate_model_port}/generate",
+                    json={
+                        "text": prompts,
+                        "sampling_params": generate_model_config,
+                    },
+                )
+                completions = [output["text"] for output in response.json()]
+                if print_text:
+                    print("=" * 100)
+                    print(f"text for dataset: {single_dataset_name}")
+                    print("=" * 100)
+                for prompt, example, completion in zip(prompts, dataset.select(indices), completions):
+                    if print_text:
+                        print(f"Prompt: {prompt}")
+                        print("-" * 100)
+                        print(f"Completion: {completion}")
+                        print("-" * 100)
+                        print(f"Answer: {example['answer']}")
+                        print("-" * 100)
+                    if single_dataset_name == "MATH-500":
+                        gold_parsed = parse(
+                            f"\\boxed{{{example['answer']}}}",
+                            extraction_mode="first_match",
+                        )
+                    else:
+                        gold_parsed = parse(
+                            example["answer"],
+                            extraction_mode="first_match",
+                        )
+                    if len(gold_parsed) != 0:
+                        # We require the answer to be provided in correct latex (no malformed operators)
+                        answer_parsed = parse(
+                            completion,
+                            extraction_config=[
+                                LatexExtractionConfig(
+                                    normalization_config=NormalizationConfig(
+                                        nits=False,
+                                        malformed_operators=False,
+                                        basic_latex=True,
+                                        boxed="all",
+                                        units=True,
+                                    ),
+                                    # Ensures that boxed is tried first
+                                    boxed_match_priority=0,
+                                    try_extract_without_anchor=False,
+                                )
+                            ],
+                            extraction_mode="first_match",
+                        )
+                        # Compute binary rewards if verifiable, `None` otherwise to skip this example
+                        try:
+                            score = float(verify(gold_parsed, answer_parsed))
+                        except Exception:
+                            score = None
+                    else:
+                        # If the gold solution is not parseable, we assign `None` to skip this example
+                        score = float(completion.strip().lower() == example["answer"].strip().lower())
+                    if print_text:
+                        print(f"Score: {score}")
+                        print("-" * 100)
+                    scores.append(score)
+                if print_text:
+                    print("=" * 100)
+                rewards.append(np.mean(scores))
+            else:
+                rewards.append(0)
+        return rewards
+    return template_accuracy_math_reward
+
+def get_accuracy_math_split(generate_model_ip: str, generate_model_port: int, tokenizer: AutoTokenizer, system_prompt: str="", test_size: int=10, is_test: bool=False, print_text: bool=False) -> Callable:
+
+    def accuracy_math_reward_split(completions: list[list[dict[str, str]]], dataset_name: list[str], subject: list[str], **kwargs) -> list[Optional[float]]:
+        r"""
+        Reward function that checks if the completion is the same as the ground truth.
+        """
+        rewards = []
+        for instruction, single_dataset_name, single_subject in zip(completions, dataset_name, subject):
+            if single_dataset_name in ["gsm8k", "MATH-500"]:
+                if is_test:
+                    dataset = test_dataset_dict[single_dataset_name].filter(lambda x: x["subject"] == single_subject)
+                    sample_size = len(dataset)
+                else:
+                    dataset = train_dataset_dict[single_dataset_name].filter(lambda x: x["subject"] == single_subject)
+                    sample_size = min(test_size, len(dataset))
+                scores = []
+                generate_model_config = {
+                    "temperature": 0.7,
+                    "top_p": 0.8,
+                    "top_k": 20,
+                    "presence_penalty": 1.5,
+                    "max_new_tokens": 2048,
+                }
+                random.seed(time.time())
+                indices = random.sample(range(len(dataset)), sample_size)
+                prompts = []
+                for example in dataset.select(indices):
+                    prompt = tokenizer.apply_chat_template(
+                        get_messages(instruction, example, single_dataset_name, system_prompt),
+                        tokenize=False,
+                        add_generation_prompt=True,
+                        enable_thinking=False
+                    )
+                    prompts.append(prompt)
+                response = requests.post(
+                    f"http://{generate_model_ip}:{generate_model_port}/generate",
+                    json={
+                        "text": prompts,
+                        "sampling_params": generate_model_config,
+                    },
+                )
+                completions = [output["text"] for output in response.json()]
+                if print_text:
+                    print("=" * 100)
+                    print(f"text for dataset: {single_dataset_name}")
+                    print("=" * 100)
+                for prompt, example, completion in zip(prompts, dataset.select(indices), completions):
+                    if print_text:
+                        print(f"Prompt: {prompt}")
+                        print("-" * 100)
+                        print(f"Completion: {completion}")
+                        print("-" * 100)
+                        print(f"Answer: {example['answer']}")
+                        print("-" * 100)
+                    if single_dataset_name == "MATH-500":
+                        gold_parsed = parse(
+                            f"\\boxed{{{example['answer']}}}",
+                            extraction_mode="first_match",
+                        )
+                    else:
+                        gold_parsed = parse(
+                            example["answer"],
+                            extraction_mode="first_match",
+                        )
+                    if len(gold_parsed) != 0:
+                        # We require the answer to be provided in correct latex (no malformed operators)
+                        answer_parsed = parse(
+                            completion,
+                            extraction_config=[
+                                LatexExtractionConfig(
+                                    normalization_config=NormalizationConfig(
+                                        nits=False,
+                                        malformed_operators=False,
+                                        basic_latex=True,
+                                        boxed="all",
+                                        units=True,
+                                    ),
+                                    # Ensures that boxed is tried first
+                                    boxed_match_priority=0,
+                                    try_extract_without_anchor=False,
+                                )
+                            ],
+                            extraction_mode="first_match",
+                        )
+                        # Compute binary rewards if verifiable, `None` otherwise to skip this example
+                        try:
+                            score = float(verify(gold_parsed, answer_parsed))
+                        except Exception:
+                            score = None
+                    else:
+                        # If the gold solution is not parseable, we assign `None` to skip this example
+                        score = float(completion.strip().lower() == example["answer"].strip().lower())
+                    if print_text:
+                        print(f"Score: {score}")
+                        print("-" * 100)
+                    scores.append(score)
+                if print_text:
+                    print("=" * 100)
+                rewards.append(np.mean(scores))
+            else:
+                rewards.append(0)
+        return rewards
+    return accuracy_math_reward_split

@@ -6,6 +6,8 @@ _import_structure = {
         "get_accuracy_nq_open_instruction_prewrite",
         "get_f1_nq_open_instruction_prewrite",
         "get_f1_classification",
+        "get_template_accuracy_math",
+        "get_accuracy_math_split",
     ],
 }
 
@@ -16,6 +18,8 @@ from .prewrite_rewards import (
     get_accuracy_nq_open_instruction_prewrite,
     get_f1_nq_open_instruction_prewrite,
     get_f1_classification,
+    get_template_accuracy_math,
+    get_accuracy_math_split,
 )
 
 __all__ = [
@@ -25,4 +29,6 @@ __all__ = [
     "get_accuracy_nq_open_instruction_prewrite",
     "get_f1_nq_open_instruction_prewrite",
     "get_f1_classification",
+    "get_template_accuracy_math",
+    "get_accuracy_math_split",
 ]

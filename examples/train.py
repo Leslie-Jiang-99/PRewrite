@@ -73,6 +73,8 @@ from prewrite import (
     get_accuracy_nq_open_instruction_prewrite,
     get_f1_nq_open_instruction_prewrite,
     get_f1_classification,
+    get_template_accuracy_math,
+    get_accuracy_math_split,
 )
 
 from accelerate import PartialState
@@ -96,6 +98,8 @@ reward_funcs_registry = {
     "accuracy_nq_open_instruction_prewrite_reward": get_accuracy_nq_open_instruction_prewrite,
     "f1_nq_open_instruction_prewrite_reward": get_f1_nq_open_instruction_prewrite,
     "f1_classification_reward": get_f1_classification,
+    "template_accuracy_math_reward": get_template_accuracy_math,
+    "accuracy_math_reward_split": get_accuracy_math_split,
 }
 
 from sglang.srt.sampling.custom_logit_processor import CustomLogitProcessor
@@ -132,6 +136,8 @@ class PRewriteScriptArguments(ScriptArguments):
                 - `"accuracy_nq_open_instruction_prewrite_reward"`
                 - `"f1_nq_open_instruction_prewrite_reward"`
                 - `"f1_classification_reward"`
+                - `"template_accuracy_math_reward"`
+                - `"accuracy_math_reward_split"`
         generate_model_name_or_path (`str`, *optional*):
             Name or path of the generate model.
         generate_model_ip (`str`, *optional*):
@@ -146,14 +152,14 @@ class PRewriteScriptArguments(ScriptArguments):
             Size of the test set for the instruction prewrite accuracy reward.
         generate_dataset_seed (`int`, *optional*):
             Seed for the random number selection for the generate dataset.
-        generate_model_offline (`bool`, *optional*):
-            Whether to use the offline generate model.
+        generate_is_test (`bool`, *optional*):
+            Whether to use the test set for the instruction prewrite accuracy reward.
     """
 
     reward_funcs: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "Reward functions to use. Supported values are: 'prewrite_accuracy_reward','accuracy_math_reward','accuracy_classification_reward','accuracy_nq_open_instruction_prewrite_reward','f1_nq_open_instruction_prewrite_reward','f1_classification_reward'"
+            "help": "Reward functions to use. Supported values are: 'prewrite_accuracy_reward','accuracy_math_reward','accuracy_classification_reward','accuracy_nq_open_instruction_prewrite_reward','f1_nq_open_instruction_prewrite_reward','f1_classification_reward','template_accuracy_math_reward','accuracy_math_reward_split'"
         },
     )
     meta_instruction: str = field(
@@ -172,9 +178,9 @@ class PRewriteScriptArguments(ScriptArguments):
         default=8000,
         metadata={"help": "Port of the generate model."},
     )
-    generate_model_offline: bool = field(
+    generate_is_test: bool = field(
         default=False,
-        metadata={"help": "Whether to use the offline generate model."},
+        metadata={"help": "Whether to use the test set for the instruction prewrite accuracy reward."},
     )
     tokenizer: AutoTokenizer = field(
         default=None,
@@ -229,7 +235,7 @@ def main(script_args, training_args, model_args, dataset_args):
                             tokenizer=tokenizer,
                             system_prompt=script_args.generate_system_prompt,
                             test_size=script_args.test_size,
-                            is_test=False,
+                            is_test=script_args.generate_is_test,
                         )
                     )
                 elif func_name == "accuracy_classification_reward":
@@ -247,7 +253,7 @@ def main(script_args, training_args, model_args, dataset_args):
                             system_prompt=script_args.generate_system_prompt,
                             test_size=script_args.test_size,
                             custom_logit_processor=ClassificationLogitProcessor(),
-                            is_test=False,
+                            is_test=script_args.generate_is_test,
                         )
                     )
                 elif func_name == "accuracy_nq_open_instruction_prewrite_reward":
@@ -264,7 +270,7 @@ def main(script_args, training_args, model_args, dataset_args):
                             tokenizer=tokenizer,
                             system_prompt=script_args.generate_system_prompt,
                             test_size=script_args.test_size,
-                            is_test=False,
+                            is_test=script_args.generate_is_test,
                         )
                     )
                 elif func_name == "f1_nq_open_instruction_prewrite_reward":
@@ -281,7 +287,7 @@ def main(script_args, training_args, model_args, dataset_args):
                             tokenizer=tokenizer,
                             system_prompt=script_args.generate_system_prompt,
                             test_size=script_args.test_size,
-                            is_test=False,
+                            is_test=script_args.generate_is_test,
                         )
                     )
                 elif func_name == "f1_classification_reward":
@@ -299,7 +305,43 @@ def main(script_args, training_args, model_args, dataset_args):
                             system_prompt=script_args.generate_system_prompt,
                             test_size=script_args.test_size,
                             custom_logit_processor=ClassificationLogitProcessor(),
-                            is_test=False,
+                            is_test=script_args.generate_is_test,
+                        )
+                    )
+                elif func_name == "template_accuracy_math_reward":
+                    if script_args.generate_model_name_or_path:
+                        tokenizer = AutoTokenizer.from_pretrained(script_args.generate_model_name_or_path)
+                    elif script_args.tokenizer:
+                        tokenizer = script_args.tokenizer
+                    else:
+                        raise ValueError("Either `generate_model_name_or_path` or `tokenizer` must be provided.")
+                    reward_funcs.append(
+                        get_template_accuracy_math(
+                            generate_model_ip=script_args.generate_model_ip,
+                            generate_model_port=script_args.generate_model_port,
+                            tokenizer=tokenizer,
+                            system_prompt=script_args.generate_system_prompt,
+                            test_size=script_args.test_size,
+                            is_test=script_args.generate_is_test,
+                            print_text=False,
+                        )
+                    )
+                elif func_name == "accuracy_math_reward_split":
+                    if script_args.generate_model_name_or_path:
+                        tokenizer = AutoTokenizer.from_pretrained(script_args.generate_model_name_or_path)
+                    elif script_args.tokenizer:
+                        tokenizer = script_args.tokenizer
+                    else:
+                        raise ValueError("Either `generate_model_name_or_path` or `tokenizer` must be provided.")
+                    reward_funcs.append(
+                        get_accuracy_math_split(
+                            generate_model_ip=script_args.generate_model_ip,
+                            generate_model_port=script_args.generate_model_port,
+                            tokenizer=tokenizer,
+                            system_prompt=script_args.generate_system_prompt,
+                            test_size=script_args.test_size,
+                            is_test=script_args.generate_is_test,
+                            print_text=False,
                         )
                     )
                 else:
@@ -315,44 +357,10 @@ def main(script_args, training_args, model_args, dataset_args):
                     f"Could not load reward function '{func_name}'. Expected one of "
                     f"{list(reward_funcs_registry.keys())} or a valid import path."
                 )
+
     # Load the dataset
-    """
-    if dataset_args.datasets and script_args.dataset_name:
-        logger.warning(
-            "Both `datasets` and `dataset_name` are provided. The `datasets` argument will be used to load the "
-            "dataset and `dataset_name` will be ignored."
-        )
-        dataset = get_dataset(dataset_args)
-    elif dataset_args.datasets and not script_args.dataset_name:
-        dataset = get_dataset(dataset_args)
-    elif not dataset_args.datasets and script_args.dataset_name:
-        dataset = load_dataset(
-            script_args.dataset_name, name=script_args.dataset_config, streaming=script_args.dataset_streaming
-        )
-    else:
-        raise ValueError("Either `datasets` or `dataset_name` must be provided.")
-    """
     dataset = load_from_disk(script_args.dataset_name)
-    """
-    def add_meta_instruction(element):
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
-        element["prompt"] = tokenizer.apply_chat_template(
-            [
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant."
-                },
-                {
-                    "role": "user",
-                    "content": f"{script_args.meta_instruction}\nQuestion: {element['question']}"
-                }
-            ],
-            tokenize=False,
-            add_generation_prompt=True,
-            enable_thinking=False,
-        )
-        return element
-    """
+
     def add_meta_instruction(element):
         tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
         element["prompt"] = tokenizer.apply_chat_template(

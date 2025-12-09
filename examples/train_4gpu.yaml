@@ -1,6 +1,6 @@
 model_name_or_path: /root/group-shared/jrc/base_models/Qwen3-14B 
-output_dir: /root/group-shared/jrc/trained_models/4gpu_math_500_only
-dataset_name: /root/workspace/PRewrite/data/math_500_only
+output_dir: /root/group-shared/jrc/trained_models/ag_news_only_64
+dataset_name: /root/workspace/PRewrite/data/ag_news_only
 dataset_config: default
 dataset_train_split: train
 dataset_test_split: test
@@ -14,27 +14,29 @@ vllm_mode: colocate
 log_completions: true
 # reward functions settings
 reward_funcs:
-  - accuracy_math_reward
+  - accuracy_classification_reward
+  - f1_classification_reward
 reward_weights:
+  - 0.0
   - 1.0
 generate_model_name_or_path: /root/group-shared/jrc/base_models/Qwen3-32B
 generate_model_ip: 0.0.0.0
 generate_model_port: 33337
-generate_model_offline: false
-test_size: 16
+generate_is_test: false
+test_size: 100
 generate_dataset_seed: 42
 # vllm settings
 use_vllm: true
 vllm_mode: colocate
 vllm_tensor_parallel_size: 4
 vllm_gpu_memory_utilization: 0.2
-num_generations: 32
+num_generations: 64
 temperature: 1.0
 use_liger_kernel: true
 use_liger_loss: false
-per_device_train_batch_size: 1
-per_device_eval_batch_size: 1
-gradient_accumulation_steps: 8
+per_device_train_batch_size: 16
+per_device_eval_batch_size: 16
+gradient_accumulation_steps: 1
 loss_type: dapo
 epsilon: 0.2
 epsilon_high: 0.28
@@ -42,10 +44,10 @@ num_train_epochs: 1000
 eval_strategy: "no"
 eval_steps: 1
 save_strategy: "steps"
-save_steps: 50
+save_steps: 10
 save_total_limit: 1
 logging_steps: 1
 report_to:
   - tensorboard
 project_name: PRewrite
-run_name: 4gpu_math_500_only
+run_name: ag_news_only_32

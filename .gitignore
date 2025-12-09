@@ -29,3 +29,6 @@ env/
 
 # analysis
 analysis/
+
+# results
+results/
