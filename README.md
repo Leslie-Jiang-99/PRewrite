@@ -136,6 +136,12 @@ accelerate launch \
 bash scripts/train_multi_stage.sh
 ```
 
+## 结果测试
+
+参考`examples/model_test.py`，关键参数是`get_xx`函数中将`is_test`设置为`true`，就会对测试集的全集进行reward计算.
+
+对于multi-stage训练，由于模型会重置，可以从log中取出rewrite的prompt，自己构建<prompt,dataset_name>对，再调用奖励函数进行计算，参考`examples/test_math_results.py`.
+
 ## 项目结构
 
 ```
